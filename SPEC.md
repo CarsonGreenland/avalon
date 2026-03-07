@@ -44,6 +44,8 @@ Each round:
 - **Good wins** if 3 quests succeed
 - **Evil wins** if 3 quests fail, or if 5 consecutive team proposals are rejected
 
+*Note: The Merlin assassination phase (Evil identifies and kills Merlin after Good wins 3 quests) is a special roles mechanic — not present in the core game. Add when Merlin/Assassin roles are implemented.*
+
 ---
 
 ## Information Model
