@@ -8,10 +8,15 @@ CLI implementation of *The Resistance: Avalon*, core game only. 1 human vs 4 AI 
 
 ## Game Rules (5-Player Core)
 
+### Roles (5-player core)
+- **Merlin** (Good) — knows who the evil players are, but must not reveal himself
+- **Loyal Servant of Arthur** ×2 (Good) — no special knowledge
+- **Assassin** (Evil) — gets the assassination attempt at the end; knows other evil player
+- **Minion of Mordred** ×1 (Evil) — knows other evil player; knows Merlin knows them
+
 ### Setup
-- 3 Good players (Loyal Servants of Arthur), 2 Evil players (Minions of Mordred)
-- Evil players know each other. Good players know nothing about alignment.
-- Roles are assigned randomly. Human player is always Good (consider making this a future option).
+- Roles assigned randomly. Human player is always Good (consider making this a future option).
+- Evil players know each other. Merlin knows who the evil players are. Loyal Servants know nothing.
 - Leader starts randomly.
 
 ### Quest Structure (5-player)
@@ -41,10 +46,16 @@ Each round:
 5. Leadership passes clockwise
 
 ### Victory
-- **Good wins** if 3 quests succeed
-- **Evil wins** if 3 quests fail, or if 5 consecutive team proposals are rejected
+- **Good wins** if 3 quests succeed AND the Assassin fails to identify Merlin
+- **Evil wins** if 3 quests fail, or if 5 consecutive team proposals are rejected, or if Good wins 3 quests but the Assassin correctly identifies Merlin
 
-*Note: The Merlin assassination phase (Evil identifies and kills Merlin after Good wins 3 quests) is a special roles mechanic — not present in the core game. Add when Merlin/Assassin roles are implemented.*
+### Assassination Phase
+After Good wins 3 quests, the game enters the **Assassination Phase** before declaring Good the winner:
+1. The Assassin names one player as Merlin
+2. If correct → Evil wins despite losing the quests
+3. If wrong → Good wins
+
+This is the core dramatic tension of Avalon: Merlin must subtly guide Good without revealing himself.
 
 ---
 
@@ -54,17 +65,26 @@ Each player has a distinct **knowledge state**:
 
 ```
 PlayerView:
-  - own_alignment: Good | Evil
-  - known_evil: set of player indices (Evil players know each other; Good know nobody)
+  - player_idx: int
+  - own_role: Role (MERLIN | LOYAL_SERVANT | ASSASSIN | MINION_OF_MORDRED)
+  - own_alignment: Good | Evil  (derived from role)
+  - known_evil: set of player indices
+      - Evil players: all evil player indices (they know each other)
+      - Merlin: all evil player indices (he sees them)
+      - Loyal Servant: empty
   - quest_history: list of (team, result, fail_count) — public
-  - vote_history: list of (round, player, approve/reject) — public
-  - team_history: list of (round, leader, proposed_team) — public
+  - round_history: list of (round, leader, proposed_team, votes) — public
   - current_leader: player index
   - rejection_streak: int (0–4)
   - quest_scores: (good_wins, evil_wins)
+  - player_names: dict[int, str] — public
+  - player_count: int
+  - current_quest: int (0-indexed)
 ```
 
 **Critical design principle:** The game engine holds ground truth. Each AI player is given only its own PlayerView when making decisions. No player ever receives information they shouldn't have. This must be enforced structurally, not by convention.
+
+Note: `known_evil` being non-empty for Merlin does NOT reveal Merlin's identity to evil players — that information asymmetry is one-way.
 
 ---
 
@@ -91,16 +111,23 @@ Evidence that decreases suspicion:
 
 **1. Team Proposal (Leader)**
 - Build a team that maximizes expected quest success
-- Good: pick players with lowest suspicion scores
+- Loyal Servant: pick players with lowest suspicion scores
+- Merlin: knows who is evil; subtly avoids evil players, but must not be too obvious or the Assassin will target him
 - Evil: pick self + one evil ally if possible, disguise by including trusted Goods; or sacrifice one evil if strategically necessary
 
 **2. Team Vote**
-- Good: approve if suspicion of all team members is below threshold; reject if any member highly suspected
+- Loyal Servant: approve if suspicion of all team members is below threshold; reject if any member highly suspected
+- Merlin: reject teams with known evil on them, but occasionally approve to avoid being too obviously "all-knowing"
 - Evil: approve teams containing at least one evil player; reject otherwise (but occasionally approve bad teams to avoid being read as predictable)
 
 **3. Quest Vote (on team)**
-- Good: always Success
+- Good (any): always Success
 - Evil: strategic — Fail if it won't be obvious (e.g., team of 3 with 1 evil → 1 fail is ambiguous); consider Success if maintaining cover matters more
+
+**4. Assassination (Assassin only)**
+- After Good wins 3 quests, the Assassin must name one player as Merlin
+- Strategy: observe who seemed most informed about evil identities; who made suspiciously accurate accusations; who proposed consistently clean teams; who voted against evil-heavy teams
+- The Assassin's guess is the game's final drama
 
 ### Personality Types
 
@@ -141,13 +168,14 @@ GameState:
   round_history: list[Round]
   current_leader: int
   rejection_streak: int
-  phase: Setup | TeamProposal | TeamVote | Quest | GameOver
+  phase: Setup | TeamProposal | TeamVote | Quest | Assassination | GameOver
 ```
 
 ```
 Player:
   name: str
-  alignment: Good | Evil
+  role: Role  (MERLIN | LOYAL_SERVANT | ASSASSIN | MINION_OF_MORDRED)
+  alignment: Good | Evil  (derived from role)
   personality: Hawk | Dove | Fox | Bull
   is_human: bool
   suspicion_model: dict[int, float]
@@ -203,7 +231,7 @@ Modularity notes:
 
 ## Future Expansion Hooks
 
-- Special roles (Merlin, Percival, Mordred, Morgana, Assassin, Oberon) — architecture supports via PlayerView extensions
+- Optional roles (Percival, Mordred, Morgana, Oberon) — architecture supports via PlayerView extensions and Role enum additions
 - Variable player count (5–10) — config table already planned
 - Multi-round match mode (like Coup)
 - Personality evolution / learning across matches
