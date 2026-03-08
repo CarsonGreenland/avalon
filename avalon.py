@@ -42,7 +42,7 @@ def run_team_proposal(state: GameState, ai_players: Dict[int, AIPlayer],
         cli.show_team_proposal(leader.name, team_names)
         if stmt:
             cli.ai_speaks(leader.name, stmt)
-        cli.press_enter()
+        # No press_enter — flow straight to team vote
 
     state.record_team_proposal(team)
     return team
@@ -51,6 +51,8 @@ def run_team_proposal(state: GameState, ai_players: Dict[int, AIPlayer],
 def run_team_vote(state: GameState, ai_players: Dict[int, AIPlayer],
                   team: List[int], human_idx: int) -> bool:
     """Handle the team vote phase. Returns True if approved."""
+    proposer_idx = state.current_leader  # still the proposer at this point
+
     cli.header(f"Team Vote — Quest {state.current_quest + 1}")
     team_names = [state.players[i].name for i in team]
     print(f"\n  Proposed team: {', '.join(team_names)}")
@@ -64,11 +66,15 @@ def run_team_vote(state: GameState, ai_players: Dict[int, AIPlayer],
             vote = cli.prompt_team_vote()
             votes[p.idx] = vote
         else:
-            ai = ai_players[p.idx]
-            vote, stmt = ai.decide_team_vote(view, team)
-            votes[p.idx] = vote
-            if stmt:
-                ai_statements.append((p.name, stmt))
+            # Leader always approves their own proposal
+            if p.idx == proposer_idx:
+                votes[p.idx] = True
+            else:
+                ai = ai_players[p.idx]
+                vote, stmt = ai.decide_team_vote(view, team)
+                votes[p.idx] = vote
+                if stmt:
+                    ai_statements.append((p.name, stmt))
 
     # Show AI statements
     if ai_statements:
@@ -79,13 +85,14 @@ def run_team_vote(state: GameState, ai_players: Dict[int, AIPlayer],
     # Show vote results
     name_votes = {state.players[i].name: v for i, v in votes.items()}
     cli.show_votes(name_votes)
-    cli.press_enter()
+    # No press_enter — flow straight to quest or next proposal
 
     approved = state.record_team_votes(votes)
 
     if state.check_rejection_loss():
         cli.header("5 CONSECUTIVE REJECTIONS")
         print(f"\n  The kingdom falls to chaos. Evil wins by default.")
+        cli.press_enter()
         return False
 
     return approved
@@ -128,7 +135,7 @@ def run_quest(state: GameState, ai_players: Dict[int, AIPlayer],
         for name, stmt in reactions:
             cli.ai_speaks(name, stmt)
 
-    cli.press_enter()
+    # No press_enter — flow straight to next proposal
     return result
 
 
@@ -141,7 +148,6 @@ def run_assassination(state: GameState, ai_players: Dict[int, AIPlayer],
     merlin = state.players[merlin_idx]
 
     if assassin.is_human:
-        # Human is the Assassin (unusual but possible)
         cli.header("ASSASSINATION PHASE")
         view = state.build_player_view(assassin_idx)
         print(f"\n  Good has won three quests. As the Assassin, you have one chance.")
@@ -192,7 +198,6 @@ def play_game():
         elif state.phase == Phase.QUEST:
             run_quest(state, ai_players, team, human_idx)
 
-        # Recheck after each phase
         if state.phase == Phase.GAME_OVER:
             break
 
